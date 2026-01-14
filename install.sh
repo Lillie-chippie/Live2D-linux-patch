@@ -1,99 +1,85 @@
 #!/bin/bash
 
-# Live2D Cubism 2.0 Linux Patch Installer
+# Live2D Cubism 5.2 Linux Patch Installer
 # ---------------------------------------
 
 set -e
 
-echo "Installing Live2D Cubism 2.0 Linux Patch..."
-
-# Check if we are in the correct directory (should be run from inside linux_patch folder, but we assume user might extract it over the app)
-# We expect to find ../app/lib/Live2D_Cubism.jar if we are in the patch folder inside the app folder
-# OR we expect to find ./app/lib/Live2D_Cubism.jar if the user extracted the contents of this folder into the app root.
+echo "Installing Live2D Cubism 5.2 Linux Patch..."
 
 BASE_DIR="$(dirname "$0")"
 cd "$BASE_DIR"
 
-# Try to locate the Jar
-JAR_PATH=""
-if [ -f "../app/lib/Live2D_Cubism.jar" ]; then
-    JAR_PATH="../app/lib/Live2D_Cubism.jar"
+# Check for target directory structure
+if [ -d "../app/lib" ]; then
     ROOT_DIR=".."
-elif [ -f "app/lib/Live2D_Cubism.jar" ]; then
-    JAR_PATH="app/lib/Live2D_Cubism.jar"
+elif [ -d "app/lib" ]; then
     ROOT_DIR="."
 else
-    echo "Error: Could not find app/lib/Live2D_Cubism.jar"
-    echo "Please extract this folder into the Live2D Cubism 2.0 directory."
+    echo "Error: Could not find app/lib directory."
+    echo "Please extract this folder into the Live2D Cubism 5.2 directory."
     exit 1
 fi
 
-echo "Found Jar at: $JAR_PATH"
+echo "Target directory: $ROOT_DIR"
 
-# Check for dependencies
-if ! command -v zip &> /dev/null; then
-    echo "Error: 'zip' command not found. Please install it (e.g., sudo apt install zip)."
-    exit 1
-fi
-if ! command -v unzip &> /dev/null; then
-    echo "Error: 'unzip' command not found. Please install it (e.g., sudo apt install unzip)."
-    exit 1
-fi
-if ! command -v python3 &> /dev/null; then
-    echo "Error: 'python3' command not found. Please install it."
-    exit 1
-fi
-
-# Backup Jar
-if [ ! -f "${JAR_PATH}.bak" ]; then
-    echo "Backing up original jar..."
-    cp "$JAR_PATH" "${JAR_PATH}.bak"
+# Extract native libraries from jars
+echo "Extracting native libraries..."
+if [ -d "lib_linux" ]; then
+    cd lib_linux
+    if [ ! -f "libgluegen_rt.so" ]; then
+        unzip -o -q gluegen-rt-natives-linux-amd64.jar "natives/linux-amd64/*" 2>/dev/null || true
+        unzip -o -q jogl-all-natives-linux-amd64.jar "natives/linux-amd64/*" 2>/dev/null || true
+        if [ -d "natives/linux-amd64" ]; then
+            mv natives/linux-amd64/* .
+            rm -rf natives
+        fi
+    fi
+    cd ..
 fi
 
-# Create temp dir
-TEMP_DIR=$(mktemp -d)
-echo "Working in $TEMP_DIR..."
+# Clean up temporary files in lib_linux
+echo "Cleaning up temporary files..."
+find lib_linux -name "*.zip" -delete
+find lib_linux -name "*.jar" -delete
+find lib_linux -name "*.tgz" -delete
+rm -rf lib_linux/onnxruntime-linux-x64-1.13.1
 
-# Extract the specific class file
-CLASS_FILE="jp/noids/util/aH.class"
-echo "Extracting $CLASS_FILE..."
-unzip -q "$JAR_PATH" "$CLASS_FILE" -d "$TEMP_DIR"
-
-# Patch the class file
-echo "Patching class file..."
-python3 patch_jar.py "$TEMP_DIR/$CLASS_FILE"
-
-# Update the Jar
-echo "Updating Jar..."
-cd "$TEMP_DIR"
-zip -u "$OLDPWD/$JAR_PATH" "$CLASS_FILE"
-cd "$OLDPWD"
-
-# Clean up
-rm -rf "$TEMP_DIR"
-
-# Install libraries and script
+# Copy Linux Libraries
 echo "Installing Linux libraries..."
-if [ "$ROOT_DIR" == ".." ]; then
-    # We are in a subdir, copy to root
-    cp -r lib_linux "$ROOT_DIR/"
-    cp run_linux.sh "$ROOT_DIR/"
-    cp run_animator_linux.sh "$ROOT_DIR/"
-else
-    # We are in root (contents extracted), nothing to move if structure matches, 
-    # but likely user extracted a folder 'linux_patch' into root.
-    # If this script is running, we are in 'linux_patch'.
-    cp -r lib_linux "$ROOT_DIR/"
-    cp run_linux.sh "$ROOT_DIR/"
-    cp run_animator_linux.sh "$ROOT_DIR/"
-fi
+cp -r lib_linux "$ROOT_DIR/"
 
+# Copy Launch Scripts
+echo "Installing launch scripts..."
+cp run_linux.sh "$ROOT_DIR/"
+cp run_animator_linux.sh "$ROOT_DIR/"
+
+# Set Permissions
 chmod +x "$ROOT_DIR/run_linux.sh"
 chmod +x "$ROOT_DIR/run_animator_linux.sh"
+
+# Patch Live2D_Cubism.jar (Remove signatures)
+JAR_FILE="$ROOT_DIR/app/lib/Live2D_Cubism.jar"
+if [ -f "$JAR_FILE" ]; then
+    echo "Patching $JAR_FILE (removing signatures)..."
+    
+    # Apply Bytecode Patches & Unsign JAR
+    echo "Applying bytecode patches (RLM fix + License fix) and unsigning..."
+    if command -v python3 &> /dev/null; then
+        python3 scripts/apply_patches.py
+    else
+        echo "Error: python3 not found. Cannot apply bytecode patches."
+        echo "Please install python3 and run 'python3 scripts/apply_patches.py' manually."
+    fi
+    
+    echo "Patching complete."
+else
+    echo "Warning: $JAR_FILE not found. Skipping JAR patch."
+fi
 
 echo "-------------------------------------------------------"
 echo "Patch applied successfully!"
 echo "You can now run:"
-echo "  Modeler:  ./run_linux.sh"
-echo "  Animator: ./run_animator_linux.sh"
+echo "  Editor:  ./run_linux.sh"
+echo "  Viewer:  ./run_animator_linux.sh"
 echo "-------------------------------------------------------"
